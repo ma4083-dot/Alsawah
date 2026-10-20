@@ -57,7 +57,7 @@
     -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=0.5, maximum-scale=5.0, user-scalable=yes">
     <title>المعمل الكيميائي | Alsawah</title>
-    <script>window.APP_VERSION = 'v1.1.94';</script>
+    <script>window.APP_VERSION = 'v1.1.93';</script>
     <style>html:not(.qi-ready) .hub-icon:not([data-qi]),html:not(.qi-ready) #nav-fab-menu button>:first-child:not([data-qi]){visibility:hidden}html:not(.qi-ready) #nav-home-btn:not([data-qi]),html:not(.qi-ready) #nav-settings-btn:not([data-qi]){font-size:0 !important}</style>
     <style>html:not(.app-ready) body{visibility:hidden}html:not(.app-ready){background:#0b1220}html.pre-light:not(.app-ready){background:#eef3ef}html:not(.app-ready)::before{content:'Alsawah Lab';position:fixed;inset:0;display:flex;align-items:center;justify-content:center;color:#7cb9e8;font:800 22px Cairo,Tajawal,sans-serif;letter-spacing:0;z-index:2147483647}html.pre-light:not(.app-ready)::before{color:#0369a1}</style>
     <script>try{if(localStorage.getItem('appTheme')==='light-comfort')document.documentElement.classList.add('pre-light');}catch(e){}setTimeout(function(){document.documentElement.classList.add('app-ready')},2500);setTimeout(function(){document.documentElement.classList.add('qi-ready')},3000)</script>
@@ -9676,7 +9676,7 @@ input,select,textarea,.btn,.btn-outline,.btn-danger,.btn-save,.btn-avg,.chart-se
                 </div>
                 <div id="tabManagePonds" class="tab-content">
                     <div class="card"><h3>➕ إضافة حوض</h3><input type="text" id="newPond" placeholder="اسم الحوض"><button class="btn" onclick="addPond('newPond')">إضافة</button></div>
-                    <div class="card"><h3>🗑️ حذف حوض</h3><ul id="pondListManage"></ul></div>
+                    <div class="card"><h3>📋 الأحواض المحفوظة</h3><ul id="pondListManage"></ul></div>
                 </div>
             </div>
         </div>
@@ -10515,7 +10515,7 @@ input,select,textarea,.btn,.btn-outline,.btn-danger,.btn-save,.btn-avg,.chart-se
       </div>
     </div>
     <div style="font-size:11px;color:#94a3b8;margin-bottom:10px;">💡 اضغط على عنصر لإضافته للصيغة — اضغط مطوّلاً لمعرفة تفاصيله</div>
-    <div id="pt_grid" style="display:grid;grid-template-columns:repeat(18,minmax(38px,1fr));gap:2px;min-width:700px;"></div>
+    <div style="direction:ltr;overflow-x:auto;"><div id="pt_grid" style="display:grid;grid-template-columns:repeat(18,minmax(38px,1fr));gap:2px;min-width:700px;direction:ltr;"></div></div>
 
     <!-- Legend -->
     <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;font-size:10px;">
@@ -13159,9 +13159,10 @@ C₂ = [C₃·(V₁+V₂) − C₁·V₁] / V₂
                         const allDeleted = [...new Set([...localDeleted, ...remote.deletedPonds])];
                         saveDeletedPonds(allDeleted);
                     }
+                    // الحوض الموجود في الإعدادات محلياً يكسب دايماً، ومايتحذفش بقائمة محذوفات جاية من السيرفر
+                    saveDeletedPonds(getDeletedPonds().filter(d => !localPonds.includes(d)));
                     const allDeleted = getDeletedPonds();
-                    // دمج الأحواض ثم حذف ما في قائمة المحذوفات
-                    const merged = [...new Set([...remote.ponds, ...localPonds])].filter(p => !allDeleted.includes(p));
+                    const merged = [...new Set([...remote.ponds.filter(p => !allDeleted.includes(p)), ...localPonds])];
                     savePondsList(merged);
                     populatePondSelects();
                     renderPondListManage();
@@ -13292,13 +13293,29 @@ C₂ = [C₃·(V₁+V₂) − C₁·V₁] / V₂
             name = (name || '').trim();
             if (!name) return;
             const official = getPonds();
-            if (official.indexOf(name) !== -1) return; // اسم رسمي بالفعل — لا حاجة للحفظ المنفصل
-            const custom = getCustomPondNames();
-            if (custom.indexOf(name) === -1) {
-                custom.push(name);
-                saveCustomPondNames(custom);
-                populatePondDatalist();
-            }
+            if (official.indexOf(name) !== -1) return; // موجود بالفعل في الإعدادات
+            // الاسم المكتوب في التحليل بيتحفظ في قائمة الأحواض الرسمية (الإعدادات) — والحذف من الإعدادات بس
+            official.push(name);
+            savePondsList(official);
+            saveDeletedPonds(getDeletedPonds().filter(d => d !== name)); // لو كان محذوف قبل كده يتشال من المحذوفات عشان المزامنة ما ترجّعش تحذفه
+            populatePondDatalist();
+            try { renderPondListManage(); renderPondListSettings(); } catch (e) {}
+            try { if (typeof window.fsSyncArchive === 'function') window.fsSyncArchive(); } catch (e) {}
+        }
+        // ترحيل لمرة واحدة: الأسماء الحرة القديمة تتنقل لقائمة الإعدادات
+        function migrateCustomPondNames() {
+            try {
+                if (localStorage.getItem('customPondsMigratedV1')) return;
+                const custom = getCustomPondNames();
+                if (custom.length) {
+                    const deleted = getDeletedPonds();
+                    const official = getPonds();
+                    custom.forEach(n => { n = String(n || '').trim(); if (n && official.indexOf(n) === -1 && deleted.indexOf(n) === -1) official.push(n); });
+                    savePondsList(official);
+                    saveCustomPondNames([]);
+                }
+                localStorage.setItem('customPondsMigratedV1', '1');
+            } catch (e) {}
         }
 
         // ── بناء الـ datalist المشترك من الأحواض الرسمية + الأسماء الحرة المحفوظة ──
@@ -13321,11 +13338,12 @@ C₂ = [C₃·(V₁+V₂) − C₁·V₁] / V₂
         }
 
         function populatePondSelects() {
+            migrateCustomPondNames();
             populatePondDatalist();
             bindPondNameInputs();
         }
 
-        function renderPondListManage() { const ul = document.getElementById('pondListManage'); if (ul) ul.innerHTML = getPonds().map(p => `<li>${p} <button class="delete-btn" onclick="deletePond('${p.replace(/'/g,"\\'")}')">حذف</button></li>`).join(''); }
+        function renderPondListManage() { const ul = document.getElementById('pondListManage'); if (ul) ul.innerHTML = getPonds().map(p => `<li>${p}</li>`).join('') + '<li style="color:#64748b;font-size:12px;">لحذف حوض: الإعدادات ← الأحواض</li>'; }
 
 
         function debugPonds() {
@@ -14209,7 +14227,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         function filterArchivePondFromSelect() { const sel = document.getElementById('arc-pond-select'); _pondFilter = sel ? sel.value : 'all'; renderArchive(); }
 
-        function renderPondFilterButtons() { const sel = document.getElementById('arc-pond-select'); if (!sel) return; const archive = getArchive(); const ponds = [...new Set(archive.map(a => a.pond || '—').filter(Boolean))]; const currentVal = sel.value; sel.innerHTML = '<option value="all">الكل</option>' + ponds.map(p => `<option value="${p}"${p===currentVal?' selected':''}>${p}</option>`).join(''); if (!ponds.includes(currentVal) && currentVal !== 'all') { sel.value = 'all'; _pondFilter = 'all'; } }
+        function renderPondFilterButtons() { const sel = document.getElementById('arc-pond-select'); if (!sel) return; const archive = getArchive(); const ponds = [...new Set(archive.map(a => String(a.pond || '—')).filter(Boolean))]; const currentVal = sel.value; sel.innerHTML = '<option value="all">الكل</option>' + ponds.map(p => `<option value="${p}"${p===currentVal?' selected':''}>${p}</option>`).join(''); if (!ponds.includes(currentVal) && currentVal !== 'all') { sel.value = 'all'; _pondFilter = 'all'; } }
 
         function downloadArchiveScreenPDF() { const allArchive = getArchive(); let filtered = _arcFilter === 'all' ? allArchive : allArchive.filter(e => e.tab === _arcFilter); if (_pondFilter !== 'all') filtered = filtered.filter(e => (e.pond || '—') === _pondFilter); const _searchQ = (document.getElementById('archive-search')?.value || '').trim().toLowerCase(); if (_searchQ) filtered = filtered.filter(e => ((e.pond || '') + (e.date || '') + (e.note || '') + (e.tab || '')).toLowerCase().includes(_searchQ)); if (!filtered.length) { alert('لا توجد نتائج في الشاشة الحالية للتحميل'); return; } const printWin = window.open('', '_blank', 'width=900,height=800'); if (!printWin) { alert('يرجى السماح للنوافذ المنبثقة لتحميل PDF'); return; } const tabLabels = { main: 'تحليل بتخفيفات مختلفة', fixed: 'تحليل بتخفيف ٢٥ في ٥٠٠', epsom: 'تحليل بتخفيف ١٠ في ٥٠٠', vacuum: 'تحليل الفاكيوم الجديد', complete: 'تحليل كامل', precipitate: 'عينة رواسب', general: 'تحليل عام', hno3: 'HNO₃', varkem: 'كيماويات متغيرة', origin: 'سحب من الأصل', origin_salt: 'سحب من الأصل للملح', blend: 'خلط مياه' /* modified for: إضافة 16 */ }; const tabColors = { main: '#0284c7', fixed: '#16a34a', epsom: '#f0883e', vacuum: '#7c3aed', complete: '#ef4444', precipitate: '#ff9f1c', general: '#0ea5e9', hno3: '#64748b', varkem: '#0891b2', origin: '#059669', origin_salt: '#0d9488' }; const typeLabel = (() => { const sel = document.getElementById('arc-type-select'); return sel ? sel.options[sel.selectedIndex]?.text : 'الكل'; })(); const pondLabel = (() => { const sel = document.getElementById('arc-pond-select'); return sel ? sel.options[sel.selectedIndex]?.text : 'الكل'; })(); const itemsHtml = filtered.map(e => { const naVal = parseFloat((e.salts||{})['Na⁺ (ميزان شحنة)']); const naChip = (!isNaN(naVal)&&naVal>0) ? `<div class="pdf-ion-chip"><span class="name">Na⁺</span><span class="val">${naVal}</span><span class="unit">${e.unit||'mg/L'}</span></div>` : ''; const ionsHtml = Object.entries(e.ions || {}).filter(([k, val]) => { const n = parseFloat(val); return !isNaN(n) && n > 0; }).map(([k, val]) => `<div class="pdf-ion-chip"><span class="name">${k}</span><span class="val">${val}</span><span class="unit">${e.unit||'mg/L'}</span></div>`).join('') + naChip; const saltsHtml = Object.entries(e.salts || {}).filter(([k, val]) => { if (k === 'Na⁺ (ميزان شحنة)') return false; const n = parseFloat(val); return !isNaN(n) && n > 0; }).map(([k, val]) => `<div class="pdf-salt-row"><span class="sname">${k}</span><span class="sval">${val} <span class="sunit">${e.saltUnit||(e.unit==='%'?'%':'ppm')}</span></span></div>`).join(''); const tabColor = tabColors[e.tab] || '#7c3aed'; return `<div class="entry-block"><div class="entry-header"><span class="entry-pond">${e.pond||'—'}</span><span class="entry-tab" style="color:${tabColor};border-color:${tabColor};">${tabLabels[e.tab]||e.tab}</span>${e.spgr?`<span class="entry-spgr">⚖️ Sp.Gr: ${parseFloat(e.spgr).toFixed(3)}</span>`:''}<span class="entry-date">${e.date}</span>${e.note?`<span class="entry-note">📝 ${e.note}</span>`:''}</div>${ionsHtml?`<div class="section-label blue">⚛ الأيونات (${e.unit||'mg/L'})</div><div class="ions-grid">${ionsHtml}</div>`:''}${saltsHtml?`<div class="section-label green">🧂 الأملاح</div><div class="salts-grid">${saltsHtml}</div>`:''}</div>`; }).join(''); printWin.document.write(`<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8"><title>الأرشيف — ${pondLabel} — ${typeLabel}</title><link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=IBM+Plex+Mono:wght@400;600&family=Tajawal:wght@400;500;700;900&display=swap" rel="stylesheet"><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Cairo','Tajawal',sans-serif;padding:20px;color:#1e293b;background:white;font-size:12px;}.entry-block{border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:14px;page-break-inside:avoid;}.entry-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px;}.entry-pond{font-size:15px;font-weight:900;color:#f0883e;}.entry-tab{font-size:10px;border:1px solid;padding:2px 8px;border-radius:10px;}.entry-spgr{font-size:11px;font-weight:700;color:#f0883e;}.entry-date{font-size:10px;color:#64748b;margin-right:auto;}.entry-note{font-size:10px;color:#7c3aed;background:rgba(124,58,237,0.07);padding:2px 7px;border-radius:6px;}.section-label{font-size:11px;font-weight:700;padding:4px 0;margin:8px 0 6px;}.section-label.blue{color:#0284c7;}.section-label.green{color:#16a34a;}.ions-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:6px;}.pdf-ion-chip{background:rgba(2,132,199,0.06);border:1px solid rgba(2,132,199,0.2);border-radius:7px;padding:6px 8px;text-align:center;}.pdf-ion-chip .name{color:#64748b;font-size:9px;display:block;}.pdf-ion-chip .val{color:#0284c7;font-weight:700;font-size:13px;display:block;}.pdf-ion-chip .unit{color:#94a3b8;font-size:8px;display:block;}.salts-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:5px;}.pdf-salt-row{display:flex;justify-content:space-between;background:rgba(22,163,74,0.04);border:1px solid rgba(22,163,74,0.15);border-radius:6px;padding:5px 10px;}.pdf-salt-row .sname{color:#1e293b;font-weight:700;font-size:11px;}.pdf-salt-row .sval{color:#16a34a;font-weight:700;font-size:11px;}.pdf-salt-row .sunit{color:#94a3b8;font-size:9px;}@media print{body{padding:8px;}@page{margin:0.8cm;}}</style></head><body><div class="print-header"><h1>📊 الأرشيف — ${pondLabel}</h1><div class="meta">ALSAWAH — المعمل الكيميائي | النوع: ${typeLabel} | إجمالي: ${filtered.length} تحليل</div></div>${itemsHtml}<script>window.onload=function(){window.print();};<\/script></body></html>`); printWin.document.close(); }
         let _archiveChart = null;
@@ -14676,7 +14694,7 @@ document.addEventListener('DOMContentLoaded', function() {
             renderPondFilterButtons();
             const allArchive = getArchive();
             let archive = _arcFilter === 'all' ? allArchive : allArchive.filter(e => e.tab === _arcFilter);
-            if (_pondFilter !== 'all') archive = archive.filter(e => (e.pond || '—') === _pondFilter);
+            if (_pondFilter !== 'all') archive = archive.filter(e => String(e.pond || '—') === String(_pondFilter));
             const _searchQ = (document.getElementById('archive-search')?.value || '').trim().toLowerCase();
             if (_searchQ) archive = archive.filter(e => {
                 const text = ((e.pond || '') + ' ' + (e.date || '') + ' ' + (e.note || '') + ' ' + (e.tab || '')).toLowerCase();
